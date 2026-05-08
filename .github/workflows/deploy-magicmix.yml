@@ -1,0 +1,150 @@
+name: Deploy MajicMix to HF Space
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Create files and upload to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -c "
+          from huggingface_hub import HfApi
+          import os
+
+          repo_id = 'micsir/magicmix-draw'
+          api = HfApi(token=os.environ.get('HF_TOKEN'))
+
+          requirements_content = '''torch
+          torchaudio
+          diffusers
+          transformers
+          accelerate
+          safetensors
+          huggingface_hub
+          requests
+          '''
+
+          app_content = '''import gradio as gr
+          import torch
+          from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
+          import os
+          import requests
+          import tempfile
+
+          MAIN_MODEL_ID = 43331
+          LORA_GOOD_HANDS_ID = 324264
+          LORA_DETAIL_TWEAKER_ID = 58390
+          LORA_DETAIL_TWEAKER_VERSION = 62833
+
+          def download_civitai_model(model_id, version_id=None):
+              token = os.environ.get('CIVITAI_TOKEN', '')
+              url = f'https://civitai.com/api/download/models/{model_id}'
+              if version_id:
+                  url += f'?modelVersionId={version_id}'
+              headers = {'Authorization': f'Bearer {token}'}
+              response = requests.get(url, headers=headers, allow_redirects=True)
+              response.raise_for_status()
+              content_disposition = response.headers.get('Content-Disposition', '')
+              if 'filename=' in content_disposition:
+                  filename = content_disposition.split('filename=')[1].strip('\";')
+              else:
+                  filename = f'model_{model_id}.safetensors'
+              tmp_dir = tempfile.mkdtemp()
+              filepath = os.path.join(tmp_dir, filename)
+              with open(filepath, 'wb') as f:
+                  f.write(response.content)
+              return filepath
+
+          print('正在下载主模型：MajicMix Realistic...')
+          main_model_path = download_civitai_model(MAIN_MODEL_ID)
+          print(f'主模型已下载: {main_model_path}')
+
+          print('正在加载 Stable Diffusion Pipeline...')
+          pipe = StableDiffusionPipeline.from_single_file(
+              main_model_path,
+              torch_dtype=torch.float32,
+              safety_checker=None,
+              requires_safety_checker=False
+          )
+
+          print('正在下载 LoRA：Good Hands...')
+          good_hands_path = download_civitai_model(LORA_GOOD_HANDS_ID)
+          pipe.load_lora_weights(good_hands_path, adapter_name='good_hands')
+          print('Good Hands LoRA 已加载')
+
+          print('正在下载 LoRA：Detail Tweaker...')
+          detail_tweaker_path = download_civitai_model(LORA_DETAIL_TWEAKER_ID, str(LORA_DETAIL_TWEAKER_VERSION))
+          pipe.load_lora_weights(detail_tweaker_path, adapter_name='detail_tweaker')
+          print('Detail Tweaker LoRA 已加载')
+
+          pipe.set_adapters(['good_hands', 'detail_tweaker'], adapter_weights=[0.8, 0.5])
+          pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
+          pipe.to('cpu')
+
+          def generate(prompt, negative_prompt, steps, guidance_scale, width, height, seed):
+              if seed == -1:
+                  seed = torch.randint(0, 2**32, (1,)).item()
+              generator = torch.Generator().manual_seed(seed)
+              image = pipe(
+                  prompt=prompt,
+                  negative_prompt=negative_prompt,
+                  num_inference_steps=steps,
+                  guidance_scale=guidance_scale,
+                  width=width,
+                  height=height,
+                  generator=generator
+              ).images[0]
+              return image
+
+          demo = gr.Interface(
+              fn=generate,
+              inputs=[
+                  gr.Textbox(label='Prompt', placeholder='A beautiful girl, masterpiece...', lines=3),
+                  gr.Textbox(label='Negative Prompt', value='ugly, deformed, bad hands, blurry'),
+                  gr.Slider(10, 50, 25, step=1, label='Steps'),
+                  gr.Slider(1.0, 15.0, 7.5, step=0.5, label='CFG Scale'),
+                  gr.Slider(256, 768, 512, step=64, label='Width'),
+                  gr.Slider(256, 768, 512, step=64, label='Height'),
+                  gr.Number(-1, label='Seed (-1 for random)', precision=0)
+              ],
+              outputs=gr.Image(label='Generated Image'),
+              title='MajicMix Realistic + LoRA',
+              description='麦橘写实 + Good Hands + Detail Tweaker'
+          )
+
+          demo.launch()
+          '''
+
+          files = {
+              'requirements.txt': requirements_content.encode('utf-8'),
+              'app.py': app_content.encode('utf-8')
+          }
+
+          print(f'正在上传文件到 Space: {repo_id}')
+          for filename, content in files.items():
+              print(f'  上传 {filename} ...')
+              api.upload_file(
+                  path_or_fileobj=content,
+                  path_in_repo=filename,
+                  repo_id=repo_id,
+                  repo_type='space',
+              )
+              print(f'  {filename} 上传成功！')
+
+          print('部署完成！')
+          "
