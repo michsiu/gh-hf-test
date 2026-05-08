@@ -77,7 +77,7 @@ jobs:
               inputs=gr.File(label='上传音频或视频', file_types=['audio', 'video']),
               outputs=gr.Textbox(label='识别结果'),
               title='FunASR 语音识别',
-              description='Paraformer 中文语音识别模型（CPU 模式）\n支持音频和视频文件'
+              description='Paraformer 中文语音识别模型（CPU 模式）\\n支持音频和视频文件'
           )
 
           demo.launch()
