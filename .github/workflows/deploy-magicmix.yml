@@ -70,20 +70,18 @@ jobs:
                   f.write(response.content)
               return filepath
 
-          print('正在下载主模型：MajicMix Realistic...')
-          main_model_path = download_civitai_model(MAIN_MODEL_ID)
-          print(f'主模型已下载: {main_model_path}')
-
-          print('正在加载 Stable Diffusion Pipeline...')
-          pipe = StableDiffusionPipeline.from_single_file(
-              main_model_path,
+          print('正在加载基础 SD 1.5 模型...')
+          pipe = StableDiffusionPipeline.from_pretrained(
+              'runwayml/stable-diffusion-v1-5',
               torch_dtype=torch.float32,
               safety_checker=None,
-              requires_safety_checker=False,
-              load_safety_checker=False,
-              use_safetensors=True
+              requires_safety_checker=False
           )
-          print('主模型加载完成！')
+
+          print('正在下载并加载麦橘主模型作为 LoRA...')
+          main_model_path = download_civitai_model(MAIN_MODEL_ID)
+          pipe.load_lora_weights(main_model_path, adapter_name='majicmix')
+          print('麦橘 LoRA 已加载')
 
           print('正在下载 LoRA：Good Hands...')
           good_hands_path = download_civitai_model(LORA_GOOD_HANDS_ID)
@@ -95,7 +93,7 @@ jobs:
           pipe.load_lora_weights(detail_tweaker_path, adapter_name='detail_tweaker')
           print('Detail Tweaker LoRA 已加载')
 
-          pipe.set_adapters(['good_hands', 'detail_tweaker'], adapter_weights=[0.8, 0.5])
+          pipe.set_adapters(['majicmix', 'good_hands', 'detail_tweaker'], adapter_weights=[1.0, 0.8, 0.5])
           pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
           pipe.to('cpu')
           print('模型准备就绪！')
@@ -128,7 +126,7 @@ jobs:
               ],
               outputs=gr.Image(label='Generated Image'),
               title='MajicMix Realistic + LoRA',
-              description='麦橘写实 + Good Hands + Detail Tweaker'
+              description='SD 1.5 基础 + 麦橘 LoRA + Good Hands + Detail Tweaker'
           )
 
           demo.launch()
