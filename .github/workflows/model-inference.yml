@@ -1,4 +1,4 @@
-name: Run Qwen2.5-Sex Model Inference
+name: Run Qwen2.5-Se Model Inference
 
 on:
   push:
