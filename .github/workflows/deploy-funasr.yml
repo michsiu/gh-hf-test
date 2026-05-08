@@ -30,32 +30,54 @@ jobs:
           api = HfApi(token=os.environ.get('HF_TOKEN'))
 
           requirements_content = '''torch
+          torchaudio
           funasr
           '''
 
           app_content = '''import gradio as gr
           from funasr import AutoModel
+          import subprocess
+          import os
+          import torch
 
           print('正在加载 FunASR 模型...')
           model = AutoModel(
               model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
               vad_model='iic/speech_fsmn_vad_zh-cn-16k-common-pytorch',
               punc_model='iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch',
+              disable_update=True,
+              device='cpu'
           )
           print('模型加载完成！')
 
-          def transcribe(audio):
-              if audio is None:
-                  return '请上传音频文件'
-              result = model.generate(input=audio)
+          def transcribe(file):
+              if file is None:
+                  return '请上传音频或视频文件'
+              
+              # 如果是视频，提取音频
+              video_exts = ('.mp4', '.avi', '.mov', '.mkv', '.webm')
+              if file.endswith(video_exts):
+                  audio_path = file.rsplit('.', 1)[0] + '_audio.wav'
+                  subprocess.run([
+                      'ffmpeg', '-i', file, '-vn', '-acodec', 'pcm_s16le', 
+                      '-ar', '16000', '-ac', '1', audio_path, '-y'
+                  ], capture_output=True)
+                  file = audio_path
+              
+              result = model.generate(input=file)
+              
+              # 清理临时文件
+              if file.endswith('_audio.wav') and os.path.exists(file):
+                  os.remove(file)
+              
               return result[0]['text']
 
           demo = gr.Interface(
               fn=transcribe,
-              inputs=gr.Audio(type='filepath', label='上传音频'),
+              inputs=gr.File(label='上传音频或视频', file_types=['audio', 'video']),
               outputs=gr.Textbox(label='识别结果'),
               title='FunASR 语音识别',
-              description='Paraformer 中文语音识别模型（CPU 模式）'
+              description='Paraformer 中文语音识别模型（CPU 模式）\\n支持音频和视频文件'
           )
 
           demo.launch()
@@ -77,5 +99,5 @@ jobs:
               )
               print(f'  {filename} 上传成功！')
 
-          print('部署完成！')
+          print('部署完成！请等待 Hugging Face Space 构建。')
           "
