@@ -30,7 +30,7 @@ jobs:
           api = HfApi(token=os.environ.get('HF_TOKEN'))
 
           requirements_content = '''torch
-          torchaudio
+          torchvision
           diffusers
           transformers
           accelerate
@@ -79,8 +79,11 @@ jobs:
               main_model_path,
               torch_dtype=torch.float32,
               safety_checker=None,
-              requires_safety_checker=False
+              requires_safety_checker=False,
+              load_safety_checker=False,
+              use_safetensors=True
           )
+          print('主模型加载完成！')
 
           print('正在下载 LoRA：Good Hands...')
           good_hands_path = download_civitai_model(LORA_GOOD_HANDS_ID)
@@ -95,6 +98,7 @@ jobs:
           pipe.set_adapters(['good_hands', 'detail_tweaker'], adapter_weights=[0.8, 0.5])
           pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
           pipe.to('cpu')
+          print('模型准备就绪！')
 
           def generate(prompt, negative_prompt, steps, guidance_scale, width, height, seed):
               if seed == -1:
