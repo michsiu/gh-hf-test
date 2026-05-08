@@ -1,0 +1,81 @@
+name: Deploy FunASR to HF Space
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Create files and upload to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -c "
+          from huggingface_hub import HfApi
+          import os
+
+          repo_id = 'micsir/funasr'
+          api = HfApi(token=os.environ.get('HF_TOKEN'))
+
+          requirements_content = '''torch
+          funasr
+          '''
+
+          app_content = '''import gradio as gr
+          from funasr import AutoModel
+
+          print('正在加载 FunASR 模型...')
+          model = AutoModel(
+              model='iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch',
+              vad_model='iic/speech_fsmn_vad_zh-cn-16k-common-pytorch',
+              punc_model='iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch',
+          )
+          print('模型加载完成！')
+
+          def transcribe(audio):
+              if audio is None:
+                  return '请上传音频文件'
+              result = model.generate(input=audio)
+              return result[0]['text']
+
+          demo = gr.Interface(
+              fn=transcribe,
+              inputs=gr.Audio(type='filepath', label='上传音频'),
+              outputs=gr.Textbox(label='识别结果'),
+              title='FunASR 语音识别',
+              description='Paraformer 中文语音识别模型（CPU 模式）'
+          )
+
+          demo.launch()
+          '''
+
+          files = {
+              'requirements.txt': requirements_content.encode('utf-8'),
+              'app.py': app_content.encode('utf-8')
+          }
+
+          print(f'正在上传文件到 Space: {repo_id}')
+          for filename, content in files.items():
+              print(f'  上传 {filename} ...')
+              api.upload_file(
+                  path_or_fileobj=content,
+                  path_in_repo=filename,
+                  repo_id=repo_id,
+                  repo_type='space',
+              )
+              print(f'  {filename} 上传成功！')
+
+          print('部署完成！')
+          "
