@@ -1,0 +1,112 @@
+name: Run Qwen2.5-Sex Model Inference
+
+on:
+  push:
+    paths:
+      - 'task.txt'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: '输入提示词'
+        required: true
+        default: '你好'
+
+jobs:
+  parse-config:
+    runs-on: ubuntu-latest
+    outputs:
+      prompt: ${{ steps.parse.outputs.PROMPT }}
+      temperature: ${{ steps.parse.outputs.TEMPERATURE }}
+      top_p: ${{ steps.parse.outputs.TOP_P }}
+      top_k: ${{ steps.parse.outputs.TOP_K }}
+      max_tokens: ${{ steps.parse.outputs.MAX_TOKENS }}
+      system_message: ${{ steps.parse.outputs.SYSTEM_MESSAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Parse task.txt
+        id: parse
+        run: |
+          if [ -f "task.txt" ]; then
+            while IFS='=' read -r key value; do
+              [[ $key =~ ^#.*$ ]] && continue
+              [[ -z $key ]] && continue
+              value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+              echo "${key}=${value}" >> $GITHUB_OUTPUT
+            done < task.txt
+          fi
+
+  run-inference:
+    needs: parse-config
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 🚀 Call HF Space API
+        run: |
+          python -c "
+          import requests
+          import json
+          from datetime import datetime
+
+          prompt = '''${{ needs.parse-config.outputs.prompt || '你好' }}'''
+          temperature = ${{ needs.parse-config.outputs.temperature || 0.3 }}
+          top_p = ${{ needs.parse-config.outputs.top_p || 0.9 }}
+          top_k = ${{ needs.parse-config.outputs.top_k || 80 }}
+          max_tokens = ${{ needs.parse-config.outputs.max_tokens || 512 }}
+          system_message = '''${{ needs.parse-config.outputs.system_message || '' }}'''
+
+          space_url = 'https://micsir-qwen25se.hf.space/api/predict'
+
+          payload = {
+              'data': [prompt, system_message, temperature, top_p, top_k, max_tokens]
+          }
+
+          print('调用 HF Space API...')
+          response = requests.post(space_url, json=payload)
+          data = response.json()
+
+          if 'data' in data:
+              reply = data['data'][0]
+          else:
+              reply = str(data)
+
+          print('=' * 60)
+          print(reply)
+          print('=' * 60)
+
+          timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+          with open('inference_output.txt', 'w', encoding='utf-8') as f:
+              f.write(f'# Qwen2.5-Se 推理结果\n\n')
+              f.write(f'**生成时间**: {timestamp}\n\n')
+              f.write(f'**提示词**:\n{prompt}\n\n')
+              f.write(f'**参数**: temperature={temperature}, top_p={top_p}, top_k={top_k}, max_tokens={max_tokens}\n\n')
+              f.write(f'**响应**:\n{reply}\n')
+          "
+
+      - name: Upload result to artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: inference-output
+          path: inference_output.txt
+          retention-days: 7
+
+      - name: Push result to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add inference_output.txt
+          git commit -m "📝 Update inference result [skip ci]" || echo "No changes to commit"
+          git push
+      
+      - name: Keep Space alive
+        run: |
+          curl -s "https://micsir-qwen25se.hf.space" > /dev/null
+          echo "Space 保活成功"
