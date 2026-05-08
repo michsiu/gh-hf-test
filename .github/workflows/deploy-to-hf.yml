@@ -1,6 +1,5 @@
-name: Deploy to Hugging Face Space
+name: Create and Deploy to HF Space
 
-# 触发方式：手动触发
 on:
   workflow_dispatch:
 
@@ -8,49 +7,106 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      # 1. 检出代码（获取仓库中的 app.py 和 requirements.txt）
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. 安装必要的 Python 库
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install huggingface_hub
         run: pip install huggingface_hub
 
-      # 3. 上传文件到你的 Hugging Face Space
-      - name: Upload files to HF Space
+      - name: Create files and upload to HF Space
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}  # 引用你设置的密码变量
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -c "
           from huggingface_hub import HfApi
           import os
+          import base64
 
-          # 你的 Space 完整信息
           repo_id = 'micsir/qwen25se'
-          # 本地文件路径（在仓库根目录）
-          local_files = ['app.py', 'requirements.txt']
-
           api = HfApi(token=os.environ.get('HF_TOKEN'))
 
-          print(f'正在将文件上传到 Space: {repo_id}')
-          for file_path in local_files:
-              if os.path.exists(file_path):
-                  print(f'  上传 {file_path} ...')
-                  api.upload_file(
-                      path_or_fileobj=file_path,
-                      path_in_repo=file_path,
-                      repo_id=repo_id,
-                      repo_type='space',
-                      # 如果希望覆盖已存在的文件，需要设置此参数
-                      # commit_message=f'Update {file_path}'
+          # ========== requirements.txt 内容 ==========
+          requirements_content = '''torch
+          transformers>=4.44.2
+          '''
+
+          # ========== app.py 内容 ==========
+          app_content = '''import gradio as gr
+          from transformers import AutoModelForCausalLM, AutoTokenizer
+          import torch
+
+          model_name = 'ystemsrx/Qwen2.5-Sex'
+
+          print('正在加载模型...')
+          tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+          model = AutoModelForCausalLM.from_pretrained(
+              model_name,
+              torch_dtype=torch.float16,
+              device_map='auto',
+              trust_remote_code=True
+          )
+          print('模型加载完成！')
+
+          def chat(prompt, system_message='', temperature=0.3, top_p=0.9, top_k=80, max_tokens=512):
+              if not prompt.strip():
+                  return '请输入问题'
+              messages = []
+              if system_message:
+                  messages.append({'role': 'system', 'content': system_message})
+              messages.append({'role': 'user', 'content': prompt})
+              text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+              inputs = tokenizer([text], return_tensors='pt').to('cuda')
+              with torch.no_grad():
+                  outputs = model.generate(
+                      inputs.input_ids,
+                      max_new_tokens=max_tokens,
+                      temperature=temperature,
+                      top_p=top_p,
+                      top_k=top_k,
+                      do_sample=True,
+                      pad_token_id=tokenizer.eos_token_id
                   )
-                  print(f'  {file_path} 上传成功！')
-              else:
-                  print(f'警告：文件 {file_path} 未找到，跳过上传。')
+              response = tokenizer.decode(outputs[0][len(inputs.input_ids[0]):], skip_special_tokens=True)
+              return response.strip()
+
+          demo = gr.Interface(
+              fn=chat,
+              inputs=[
+                  gr.Textbox(label='Prompt', placeholder='输入你的问题...', lines=3),
+                  gr.Textbox(label='System Message', value=''),
+                  gr.Slider(0.1, 1.5, 0.3, label='Temperature'),
+                  gr.Slider(0.1, 1.0, 0.9, label='Top P'),
+                  gr.Slider(0, 100, 80, label='Top K'),
+                  gr.Slider(50, 2048, 512, label='Max Tokens')
+              ],
+              outputs=gr.Textbox(label='Response'),
+              title='Qwen2.5-Sex',
+              description='基于 Qwen2.5-1.5B 微调的对话模型'
+          )
+
+          demo.launch()
+          '''
+
+          files = {
+              'requirements.txt': requirements_content.encode('utf-8'),
+              'app.py': app_content.encode('utf-8')
+          }
+
+          print(f'正在创建文件并上传到 Space: {repo_id}')
+          for filename, content in files.items():
+              print(f'  上传 {filename} ...')
+              api.upload_file(
+                  path_or_fileobj=content,
+                  path_in_repo=filename,
+                  repo_id=repo_id,
+                  repo_type='space',
+              )
+              print(f'  {filename} 上传成功！')
+
           print('部署完成！请等待 Hugging Face Space 构建。')
           "
