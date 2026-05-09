@@ -642,7 +642,7 @@ const observer = new IntersectionObserver((entries, observer) => {
                         },100);
                         // 图片加载完成后，重新计算 Macy.js 布局
                        macy.recalculate(true);
-                   observer.unobserve(container);
+                   observer.unobserve(entry.target);
                     };
 
                 };
