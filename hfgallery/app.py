@@ -64,11 +64,9 @@ def init_gallery():
                 gi = item["genInfo"]
                 if isinstance(gi, dict):
                     prompt = gi.get("prompt", "")
-                    # Whisks 格式: modelInput.modelNameType
                     mi = gi.get("modelInput")
                     if isinstance(mi, dict) and mi.get("modelNameType"):
                         model = mi["modelNameType"]
-                    # LibLib 格式: metainformation
                     elif "metainformation" in gi:
                         meta = gi.get("metainformation", "")
                         m = re.search(r'Model:\s*([^,\n]+)', meta)
@@ -105,21 +103,22 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .header{padding:24px 20px 8px;text-align:center}
 .header h1{font-size:1.8em}
 .header p{color:#94a3b8;margin-top:5px;font-size:.9em}
-.toolbar{display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 20px 16px}
+.toolbar{display:flex;flex-direction:column;align-items:center;gap:12px;padding:0 20px 10px}
 .search-row{display:flex;gap:10px;align-items:center}
 .search-row input{padding:10px 15px;border-radius:10px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;width:280px;font-size:.95em;outline:none;transition:border .2s}
 .search-row input:focus{border-color:#6366f1}
 .search-row button{padding:10px 20px;border-radius:10px;border:none;background:#6366f1;color:#fff;cursor:pointer;font-size:.95em;font-weight:500;transition:background .2s}
 .search-row button:hover{background:#818cf8}
-.filter-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
-.filter-group{display:flex;align-items:center;gap:6px;background:#1e293b;border-radius:20px;padding:4px 4px 4px 14px}
-.filter-group .filter-label{font-size:.7em;color:#64748b;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}
-.filter-group .filter-tags{display:flex;gap:4px;flex-wrap:wrap}
-.filter-tag{padding:5px 12px;border-radius:14px;border:none;cursor:pointer;font-size:.78em;background:transparent;color:#94a3b8;transition:all .2s;white-space:nowrap}
+.filter-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:900px}
+.filter-group{display:flex;align-items:flex-start;gap:6px;background:#1e293b;border-radius:16px;padding:8px 12px;flex:1;min-width:200px}
+.filter-group .filter-label{font-size:.65em;color:#64748b;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;padding-top:2px}
+.filter-group .filter-tags{display:flex;gap:3px;flex-wrap:wrap;max-height:60px;overflow-y:auto}
+.filter-group .filter-tags::-webkit-scrollbar{width:3px}
+.filter-group .filter-tags::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+.filter-tag{padding:3px 8px;border-radius:10px;border:none;cursor:pointer;font-size:.7em;background:transparent;color:#94a3b8;transition:all .2s;white-space:nowrap;line-height:1.6}
 .filter-tag:hover{background:rgba(99,102,241,.2);color:#c7d2fe}
 .filter-tag.active{background:#6366f1;color:#fff}
-.clear-btn{background:transparent;border:1px solid #334155;color:#64748b;padding:4px 10px;border-radius:12px;cursor:pointer;font-size:.7em;transition:all .2s}
-.clear-btn:hover{border-color:#ef4444;color:#ef4444}
+.filter-tag .count{font-size:.85em;opacity:.7;margin-left:2px}
 .grid{columns:4 260px;gap:12px;padding:0 12px 12px}
 .card{break-inside:avoid;margin-bottom:12px;background:#1e293b;border-radius:12px;overflow:hidden;transition:transform .2s;position:relative}
 .card:hover{transform:scale(1.02)}
@@ -137,7 +136,7 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .lightbox .lb-prompt:hover{background:rgba(255,255,255,0.1)}
 .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s}
 .toast.show{opacity:1}
-@media(max-width:768px){.grid{columns:2 1fr}.search-row input{width:200px}}
+@media(max-width:768px){.grid{columns:2 1fr}.search-row input{width:200px}.filter-row{flex-direction:column}}
 </style>
 </head>
 <body>
@@ -170,7 +169,7 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 
 <script>
 let page=0,loading=false,all=[],searchQuery='',lbIdx=-1,activeSources=[],activeModels=[];
-let touchStartY=0;
+let touchStartY=0,modelData={};
 
 function showToast(){let t=document.getElementById('toast');t.classList.add('show');clearTimeout(t._timeout);t._timeout=setTimeout(function(){t.classList.remove('show')},2000)}
 function copyPrompt(){let d=all[lbIdx];if(d&&d.prompt){navigator.clipboard.writeText(d.prompt).then(function(){showToast()})}}
@@ -214,31 +213,50 @@ function os(){if(window.innerHeight+window.scrollY>=document.body.offsetHeight-5
 window.addEventListener('scroll',os);
 function search(){searchQuery=document.getElementById('s').value;load(true)}
 
-function toggleSource(src){let i=activeSources.indexOf(src);if(i>=0)activeSources.splice(i,1);else activeSources.push(src);renderTags('source');load(true)}
-function toggleModel(m){let i=activeModels.indexOf(m);if(i>=0)activeModels.splice(i,1);else activeModels.push(m);renderTags('model');load(true)}
+function toggleSource(src){let i=activeSources.indexOf(src);if(i>=0)activeSources.splice(i,1);else activeSources.push(src);loadFilters();load(true)}
+function toggleModel(m){let i=activeModels.indexOf(m);if(i>=0)activeModels.splice(i,1);else activeModels.push(m);renderModelTags();load(true)}
 
-function renderTags(type){
-    let container=document.getElementById(type+'-tags');
-    let activeArr=type==='source'?activeSources:activeModels;
-    container.querySelectorAll('.filter-tag').forEach(function(t){t.classList.toggle('active',activeArr.length===0||activeArr.includes(t.dataset.value))});
-    if(activeArr.length===0){let all=container.querySelector('.filter-tag');if(all)all.classList.add('active')}
+function renderModelTags(){
+    let container=document.getElementById('model-tags');
+    let models=[];
+    // 根据选中的 source 过滤模型
+    if(activeSources.length>0){
+        activeSources.forEach(function(src){if(modelData[src])models=models.concat(modelData[src])});
+    }else{
+        for(let k in modelData)models=models.concat(modelData[k]);
+    }
+    // 去重并按数量排序
+    let map={};models.forEach(function(m){map[m.name]=m.count});
+    let unique=Object.keys(map).map(function(k){return{name:k,count:map[k]}});
+    unique.sort(function(a,b){return b.count-a.count});
+    container.innerHTML='';
+    let allBtn=document.createElement('button');allBtn.className='filter-tag'+(activeModels.length===0?' active':'');allBtn.innerText='全部';
+    allBtn.onclick=function(){activeModels=[];renderModelTags();load(true)};
+    container.appendChild(allBtn);
+    unique.forEach(function(m){
+        let btn=document.createElement('button');
+        btn.className='filter-tag'+(activeModels.includes(m.name)?' active':'');
+        btn.innerHTML=m.name+' <span class="count">'+m.count+'</span>';
+        btn.onclick=function(){toggleModel(m.name)};
+        container.appendChild(btn);
+    });
 }
 
 function loadFilters(){
-    fetch('/api/filters',{credentials:'include'}).then(r=>r.json()).then(function(data){
-        ['source','model'].forEach(function(type){
-            let container=document.getElementById(type+'-tags');
-            container.innerHTML='';
-            let values=type==='source'?data.sources:data.models;
-            let allBtn=document.createElement('button');allBtn.className='filter-tag active';allBtn.dataset.value='';allBtn.innerText='全部';
-            allBtn.onclick=function(){if(type==='source'){activeSources=[]}else{activeModels=[]}renderTags(type);load(true)};
-            container.appendChild(allBtn);
-            values.forEach(function(v){
-                let btn=document.createElement('button');btn.className='filter-tag active';btn.dataset.value=v;btn.innerText=v;
-                btn.onclick=function(){if(type==='source')toggleSource(v);else toggleModel(v)};
-                container.appendChild(btn);
-            });
+    fetch('/api/filters?source='+(activeSources.length>0?activeSources.join(','):''),{credentials:'include'}).then(r=>r.json()).then(function(data){
+        // 数据源标签
+        let sc=document.getElementById('source-tags');
+        sc.innerHTML='';
+        let sall=document.createElement('button');sall.className='filter-tag'+(activeSources.length===0?' active':'');sall.innerText='全部';
+        sall.onclick=function(){activeSources=[];loadFilters();load(true)};
+        sc.appendChild(sall);
+        data.sources.forEach(function(s){
+            let btn=document.createElement('button');btn.className='filter-tag'+(activeSources.includes(s)?' active':'');btn.innerText=s;
+            btn.onclick=function(){toggleSource(s)};sc.appendChild(btn);
         });
+        // 模型数据
+        modelData=data.models;
+        renderModelTags();
     });
 }
 
@@ -268,12 +286,8 @@ async def get_images(page: int = Query(0), search: str = Query(""), limit: int =
         words = search.strip().split()
         word_clauses = []
         for w in words:
-            if re.search(r'[a-zA-Z]', w):
-                word_clauses.append("prompt REGEXP ?")
-                params.append(r'\b' + re.escape(w) + r'\b')
-            else:
-                word_clauses.append("prompt LIKE ?")
-                params.append(f"%{w}%")
+            word_clauses.append("prompt LIKE ?")
+            params.append(f"%{w}%")
         where_parts.append("(" + " AND ".join(word_clauses) + ")")
 
     if source_list:
@@ -298,11 +312,28 @@ async def get_images(page: int = Query(0), search: str = Query(""), limit: int =
     return {"total": total, "page": page, "has_more": (page + 1) * limit < total, "images": [dict(r) for r in rows]}
 
 @app.get("/api/filters")
-async def get_filters():
+async def get_filters(source: str = Query("")):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.execute("SELECT DISTINCT source FROM images ORDER BY source")
     sources = [r[0] for r in cursor.fetchall()]
-    cursor = conn.execute("SELECT DISTINCT model FROM images WHERE model != '' ORDER BY model")
-    models = [r[0] for r in cursor.fetchall()]
+
+    source_list = [s.strip() for s in source.split(",") if s.strip()] if source else []
+
+    models = {}
+    if source_list:
+        for src in source_list:
+            cursor = conn.execute(
+                "SELECT model, COUNT(*) as cnt FROM images WHERE source=? AND model!='' GROUP BY model ORDER BY cnt DESC",
+                (src,)
+            )
+            models[src] = [{"name": r[0], "count": r[1]} for r in cursor.fetchall()]
+    else:
+        cursor = conn.execute(
+            "SELECT model, COUNT(*) as cnt FROM images WHERE model!='' GROUP BY model ORDER BY cnt DESC"
+        )
+        all_models = [{"name": r[0], "count": r[1]} for r in cursor.fetchall()]
+        for src in sources:
+            models[src] = all_models
+
     conn.close()
     return {"sources": sources, "models": models}
