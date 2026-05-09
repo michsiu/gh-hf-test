@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>临时文件中转站</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+        .container { max-width: 700px; margin: 0 auto; padding: 40px 20px; }
+        h1 { font-size: 2em; margin-bottom: 10px; }
+        .subtitle { color: #94a3b8; margin-bottom: 30px; }
+        .upload-zone { border: 2px dashed #334155; border-radius: 12px; padding: 40px; text-align: center; margin-bottom: 20px; cursor: pointer; transition: all .3s; }
+        .upload-zone:hover, .upload-zone.dragover { border-color: #6366f1; background: #1e293b; }
+        .upload-zone input { display: none; }
+        .upload-icon { font-size: 3em; margin-bottom: 10px; }
+        .result-item { background: #1e293b; border-radius: 8px; padding: 15px; margin: 10px 0; }
+        .result-item .name { font-weight: bold; color: #6366f1; }
+        .result-item .url { color: #94a3b8; font-size: .85em; word-break: break-all; margin: 5px 0; }
+        .result-item .url a { color: #818cf8; }
+        .result-item .meta { font-size: .75em; color: #64748b; }
+        .copy-btn { background: #6366f1; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: .8em; }
+        .query-box { display: flex; gap: 10px; margin-bottom: 20px; }
+        .query-box input { flex: 1; padding: 10px 15px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; font-size: 1em; }
+        .query-box button { padding: 10px 20px; border-radius: 8px; border: none; background: #6366f1; color: white; cursor: pointer; font-size: 1em; }
+        .tabs { display: flex; gap: 5px; margin-bottom: 25px; }
+        .tab { padding: 10px 20px; border-radius: 8px 8px 0 0; cursor: pointer; border: none; background: #1e293b; color: #94a3b8; font-size: .9em; }
+        .tab.active { background: #6366f1; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #334155; font-size: .8em; }
+        th { color: #94a3b8; }
+        #progress { color: #6366f1; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📦 临时文件中转站</h1>
+        <p class="subtitle">上传文件获取加密短链，过期自动失效</p>
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('upload')">上传</button>
+            <button class="tab" onclick="switchTab('query')">查询</button>
+            <button class="tab" onclick="switchTab('list')">文件列表</button>
+        </div>
+        <div id="tab-upload" class="tab-content active">
+            <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <div class="upload-icon">📁</div>
+                <p>点击或拖拽上传</p>
+                <input type="file" id="fileInput" onchange="uploadFile(this.files[0])">
+            </div>
+            <div id="progress"></div>
+            <div id="result"></div>
+        </div>
+        <div id="tab-query" class="tab-content">
+            <div class="query-box">
+                <input type="text" id="queryId" placeholder="输入文件ID">
+                <button onclick="queryFile()">查询</button>
+            </div>
+            <div id="queryResult"></div>
+        </div>
+        <div id="tab-list" class="tab-content">
+            <div id="fileList"></div>
+        </div>
+    </div>
+    <script>
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+            if (name === 'list') loadFileList();
+        }
+        async function uploadFile(file) {
+            if (!file) return;
+            document.getElementById('progress').innerText = '上传中...';
+            let formData = new FormData();
+            formData.append('file', file);
+            let res = await fetch('/upload', { method: 'POST', body: formData });
+            let data = await res.json();
+            if (data.code === 200) {
+                document.getElementById('result').innerHTML = `
+                    <div class="result-item">
+                        <div class="name">${data.data.filename}</div>
+                        <div class="url">
+                            <a href="${data.data.url}" target="_blank">${data.data.url}</a>
+                            <button class="copy-btn" onclick="copyUrl('${data.data.url}')">复制</button>
+                        </div>
+                        <div class="meta">ID: ${data.data.file_id} | 大小: ${formatSize(data.data.size)} | 过期: ${data.data.expire_time}</div>
+                    </div>`;
+            } else {
+                document.getElementById('result').innerHTML = '<p>上传失败</p>';
+            }
+            document.getElementById('progress').innerText = '';
+        }
+        async function queryFile() {
+            let id = document.getElementById('queryId').value.trim();
+            if (!id) return;
+            let res = await fetch('/query/' + id);
+            let data = await res.json();
+            if (data.code === 200) {
+                document.getElementById('queryResult').innerHTML = `
+                    <div class="result-item">
+                        <div class="name">${data.data.original_name}</div>
+                        <div class="url"><a href="${data.data.url}" target="_blank">${data.data.url}</a></div>
+                        <div class="meta">ID: ${data.data.file_id} | 过期: ${data.data.expire_time}</div>
+                    </div>`;
+            } else {
+                document.getElementById('queryResult').innerHTML = '<p>文件不存在或已过期</p>';
+            }
+        }
+        async function loadFileList() {
+            let res = await fetch('/files');
+            let data = await res.json();
+            let html = '<table><tr><th>ID</th><th>文件名</th><th>大小</th><th>上传时间</th><th>过期时间</th></tr>';
+            for (let f of data.data) {
+                html += `<tr><td>${f.id}</td><td>${f.original_name}</td><td>${formatSize(f.size)}</td><td>${f.upload_time}</td><td>${f.expire_time}</td></tr>`;
+            }
+            html += '</table>';
+            document.getElementById('fileList').innerHTML = html;
+        }
+        function copyUrl(url) { navigator.clipboard.writeText(url).then(() => alert('已复制!')); }
+        function formatSize(bytes) {
+            if (!bytes) return '0 B';
+            let units = ['B', 'KB', 'MB', 'GB'];
+            let i = 0;
+            while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+            return bytes.toFixed(1) + ' ' + units[i];
+        }
+        let dropZone = document.getElementById('dropZone');
+        dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+        dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+        dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); uploadFile(e.dataTransfer.files[0]); });
+    </script>
+</body>
+</html>
