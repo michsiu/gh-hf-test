@@ -550,7 +550,7 @@ HTML = r"""<meta charset="utf-8">
     <button onclick="searchImages()" style="padding:10px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;cursor:pointer">搜索</button>
 </div>
 
-    <div class="grid-container">
+    <div id="grid-container" class="grid-container">
 
  
  
@@ -590,6 +590,14 @@ HTML = r"""<meta charset="utf-8">
         var macy;
 var allData = [];
 var searchQuery = '';
+
+var images, imageIds, imageInfos; // 全局定义
+// 在 renderCards 内部赋值
+images = grid.querySelectorAll('.grid-item .img-content');
+imageIds = grid.querySelectorAll('.image-id');
+imageInfos = grid.querySelectorAll('.image-info');
+
+
 
 function rebuildMacy(){
     if(macy) macy.recalculate(true);
