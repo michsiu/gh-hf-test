@@ -67,23 +67,27 @@ HTML = """<!DOCTYPE html>
     .header { padding: 20px; text-align: center; }
     .header h1 { font-size: 1.8em; margin: 0; }
     .header p { color: #94a3b8; margin-top: 5px; }
-    .grid-container { columns: 4 260px; gap: 10px; padding: 10px; }
-    .grid-item { position: relative; break-inside: avoid; margin-bottom: 10px; border-radius: 10px; overflow: hidden; cursor: pointer; }
-    .img-content { width: 100%; height: auto; border-radius: 10px; box-shadow: 0px 5px 10px rgba(0,0,0,0.3); cursor: pointer; display: block; }
-    .image-id, .image-info { display: none; }
+    .search-box { display: flex; justify-content: center; padding: 0 20px 20px; gap: 10px; }
+    .search-box input { padding: 10px 15px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; width: 300px; font-size: 1em; }
+    .search-box button { padding: 10px 20px; border-radius: 8px; border: none; background: #6366f1; color: #fff; cursor: pointer; }
+    .grid-container { margin: 0 auto; padding: 10px; }
+    .grid-item { position: relative; margin-bottom: 10px; border-radius: 10px; overflow: hidden; }
+    .grid-item .img-content { width: 100%; height: auto; border-radius: 10px; box-shadow: 0px 5px 10px rgba(0,0,0,0.3); cursor: pointer; display: block; }
+    .grid-item .image-id, .grid-item .image-info, .grid-item .hidden-info { display: none; }
 
-    /* overlay */
     .image-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; display: none; justify-content: center; align-items: center; flex-direction: column; }
     .image-overlay.active { display: flex; }
-    #overlayimage-container { display: flex; flex-direction: column; align-items: center; max-width: 95vw; }
-    #overlay-image { max-height: 85vh; max-width: 95vw; border-radius: 10px; transition: transform 0.3s; }
+    #overlayimage-container { max-width: 95vw; display: flex; flex-direction: column; align-items: center; }
+    #overlay-image { max-height: 85vh; max-width: 95vw; border-radius: 10px; }
     #overlay-id { color: #fff; margin-top: 15px; font-size: 14px; background: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+    #overlay-info { color: #fff; font-size: 14px; max-width: 80vw; margin-top: 10px; text-align: center; }
 </style>
 </head>
 <body>
-<div class="header">
-    <h1>🖼️ AI Gallery</h1>
-    <p id="count">加载中...</p>
+<div class="header"><h1>🖼️ AI Gallery</h1><p id="count">加载中...</p></div>
+<div class="search-box">
+    <input type="text" id="s" placeholder="搜索 prompt...">
+    <button onclick="searchImages()">搜索</button>
 </div>
 <div class="grid-container" id="grid"></div>
 
@@ -92,58 +96,113 @@ HTML = """<!DOCTYPE html>
         <img id="overlay-image">
     </div>
     <div id="overlay-id"></div>
+    <div id="overlay-info"></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/macy@2"></script>
 <script>
-const INIT_DATA = __INIT_DATA__;
+var macyInstance;
+var allImages = __INIT_DATA__;
+var currentPage = 1;
+var currentOverlayIndex = -1;
+var searchQuery = '';
 
-function renderCard(item) {
-    let div = document.createElement('div');
-    div.className = 'grid-item';
-    div.innerHTML = item.img_html;
-    // 绑定点击
-    let img = div.querySelector('.img-content');
-    if (img) {
-        img.addEventListener('click', function() {
-            openOverlay(this.src, item.hash_id);
-        });
-    }
-    return div;
+function initMacy() {
+    if (macyInstance) macyInstance.remove();
+    macyInstance = Macy({
+        container: '#grid',
+        trueOrder: false,
+        waitForImages: false,
+        margin: 10,
+        columns: 4,
+        breakAt: { 1200: 3, 768: 2, 480: 1 }
+    });
 }
 
-function openOverlay(src, id) {
-    document.getElementById('overlay-image').src = src;
-    document.getElementById('overlay-id').innerText = id;
+function renderCards(items) {
+    var grid = document.getElementById('grid');
+    items.forEach(function(item) {
+        var div = document.createElement('div');
+        div.className = 'grid-item';
+        div.innerHTML = item.img_html;
+        grid.appendChild(div);
+    });
+    // 绑定点击事件
+    var imgs = document.querySelectorAll('.grid-item .img-content');
+    imgs.forEach(function(img, idx) {
+        img.addEventListener('click', function() {
+            openOverlay(idx);
+        });
+    });
+    initMacy();
+    macyInstance.recalculate(true);
+}
+
+function openOverlay(idx) {
+    currentOverlayIndex = idx;
+    var allImgs = document.querySelectorAll('.grid-item .img-content');
+    var img = allImgs[idx];
+    document.getElementById('overlay-image').src = img.src;
+    document.getElementById('overlay-id').innerText = 'ID: ' + (allImages[idx] ? allImages[idx].hash_id : '');
+    document.getElementById('overlay-info').innerText = allImages[idx] ? allImages[idx].prompt || '' : '';
     document.getElementById('overlay').classList.add('active');
 }
 
 document.getElementById('overlay').addEventListener('click', function(e) {
-    if (e.target === this || e.target.id === 'overlay-image') {
+    if (e.target === this) {
         this.classList.remove('active');
     }
 });
 
-// 初始渲染
-let grid = document.getElementById('grid');
-INIT_DATA.forEach(item => grid.appendChild(renderCard(item)));
-document.getElementById('count').innerText = '共 ' + INIT_DATA.length + ' 张';
+// 滑动切换
+var touchStartY = 0;
+document.getElementById('overlay-image').addEventListener('touchstart', function(e) {
+    touchStartY = e.touches[0].clientY;
+    e.stopPropagation();
+});
+document.getElementById('overlay-image').addEventListener('touchend', function(e) {
+    var deltaY = e.changedTouches[0].clientY - touchStartY;
+    var allImgs = document.querySelectorAll('.grid-item .img-content');
+    if (deltaY > 50 && currentOverlayIndex > 0) {
+        openOverlay(currentOverlayIndex - 1);
+    } else if (deltaY < -50 && currentOverlayIndex < allImgs.length - 1) {
+        openOverlay(currentOverlayIndex + 1);
+    }
+    e.stopPropagation();
+});
+
+// 搜索
+async function searchImages() {
+    searchQuery = document.getElementById('s').value;
+    currentPage = 0;
+    document.getElementById('grid').innerHTML = '';
+    allImages = [];
+    await loadMore();
+}
 
 // 无限滚动
-let page = 1, loading = false;
+var loading = false;
 async function loadMore() {
     if (loading) return;
     loading = true;
-    let res = await fetch('/api/images?page=' + page, { credentials: 'include' });
-    let d = await res.json();
-    d.images.forEach(item => grid.appendChild(renderCard(item)));
-    page++;
+    var url = '/api/images?page=' + currentPage + '&search=' + encodeURIComponent(searchQuery);
+    var res = await fetch(url, { credentials: 'include' });
+    var d = await res.json();
+    allImages = allImages.concat(d.images);
+    renderCards(d.images);
+    currentPage++;
     loading = false;
+    document.getElementById('count').innerText = '共 ' + d.total + ' 张';
     if (!d.has_more) window.removeEventListener('scroll', onScroll);
 }
 function onScroll() {
     if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) loadMore();
 }
 window.addEventListener('scroll', onScroll);
+
+// 初始加载
+renderCards(INIT_DATA);
+loadMore();
 </script>
 </body>
 </html>"""
@@ -153,15 +212,13 @@ async def index():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT hash_id, img_html FROM images ORDER BY created_at DESC LIMIT 20"
+        "SELECT hash_id, prompt, img_html FROM images ORDER BY created_at DESC LIMIT 20"
     ).fetchall()
-    total = conn.execute("SELECT COUNT(*) as t FROM images").fetchone()["t"]
     conn.close()
     
     init_data = json.dumps([dict(r) for r in rows], ensure_ascii=False)
     html = HTML.replace("__INIT_DATA__", init_data)
     return HTMLResponse(content=html)
-
 @app.get("/api/images")
 async def get_images(page: int = Query(0), search: str = Query(""), limit: int = Query(20)):
     conn = sqlite3.connect(DB_PATH)
