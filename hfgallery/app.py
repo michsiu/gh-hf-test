@@ -1029,6 +1029,7 @@ const observer = new IntersectionObserver((entries, observer) => {
                 overlayImageId.classList.remove('colorChange');
             }, 750);
         }
+loadAll()
     </script>
 </body>
 
