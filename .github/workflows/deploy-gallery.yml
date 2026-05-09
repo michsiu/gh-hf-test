@@ -11,6 +11,7 @@ jobs:
       - env: { HF_TOKEN: "${{ secrets.HF_TOKEN }}" }
         run: |
           python -c "
+          import os
           from huggingface_hub import HfApi
           api = HfApi(token=os.environ['HF_TOKEN'])
           api.upload_folder(folder_path='hfgallery', repo_id='micsir/ai-gallery', repo_type='space')
