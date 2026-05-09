@@ -651,6 +651,8 @@ const observer = new IntersectionObserver((entries, observer) => {
 
         images.forEach(img => {
 
+img.loading = 'lazy';
+
                 observer.observe(img)
      
             
