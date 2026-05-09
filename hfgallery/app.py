@@ -2,11 +2,17 @@ import os
 import json
 import sqlite3
 import requests
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 
-JSON_URL = "https://raw.githubusercontent.com/michsiu/liblib/main/WhiskTasks/WhiskTasks.json"
+JSON_URL_WHISK = "https://raw.githubusercontent.com/michsiu/liblib/main/WhiskTasks/WhiskTasks.json"
+JSON_URL_LIBLIB = "https://raw.githubusercontent.com/michsiu/liblib/main/LibLibTasks/LibLibTasksImgIdDict.json"
 DB_PATH = "/tmp/gallery.db"
+
+DATA_SOURCES = {
+    "whisk": JSON_URL_WHISK,
+    "liblib": JSON_URL_LIBLIB
+}
 
 app = FastAPI()
 
@@ -18,36 +24,61 @@ def init_gallery():
     token = os.environ.get("GITHUB_TOKEN", "")
     if token:
         headers["Authorization"] = f"token {token}"
-    resp = requests.get(JSON_URL, headers=headers)
-    print(f"状态码: {resp.status_code}")
-    if resp.status_code != 200:
-        print(f"错误: {resp.text[:500]}")
-        return
-    data = resp.json()
+
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS images (
-            hash_id TEXT PRIMARY KEY,
+            hash_id TEXT,
+            source TEXT,
             created_at TEXT,
             image_url TEXT,
             prompt TEXT,
             model TEXT,
             seed INTEGER,
-            img_html TEXT
+            img_html TEXT,
+            PRIMARY KEY (source, hash_id)
         )
     """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_source ON images(source)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON images(created_at DESC)")
-    for hash_id, item in data.items():
-        panel = item.get("imagePanels", [{}])[0]
-        gen_images = panel.get("generatedImages", [{}])[0]
-        conn.execute("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?,?)",
-            (hash_id, item.get("createdAt", ""), item.get("imageUrl", ""),
-             panel.get("prompt", ""),
-             item.get("genInfo", {}).get("modelInput", {}).get("modelNameType", ""),
-             gen_images.get("seed", 0), item.get("imgList", "")))
+
+    for source, url in DATA_SOURCES.items():
+        print(f"下载 {source}: {url}")
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            print(f"  {source} 下载失败: {resp.status_code}")
+            continue
+        data = resp.json()
+        count = 0
+        for hash_id, item in data.items():
+            img_url = item.get("imageUrl") or item.get("imgUrl") or ""
+            prompt = ""
+            model = ""
+            seed = 0
+            img_html = item.get("imgList") or item.get("imgHtml") or ""
+            created_at = item.get("createdAt") or ""
+
+            if "genInfo" in item:
+                gi = item["genInfo"]
+                if isinstance(gi, dict):
+                    prompt = gi.get("prompt", "")
+                    model = gi.get("modelInput", {}).get("modelNameType", "") if isinstance(gi.get("modelInput"), dict) else ""
+                    seed = gi.get("seed", 0)
+            elif "imagePanels" in item:
+                panel = item.get("imagePanels", [{}])[0]
+                prompt = panel.get("prompt", "")
+                gen_images = panel.get("generatedImages", [{}])[0]
+                model = item.get("genInfo", {}).get("modelInput", {}).get("modelNameType", "")
+                seed = gen_images.get("seed", 0)
+
+            conn.execute("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?,?,?)",
+                (hash_id, source, created_at, img_url, prompt, model, seed, img_html))
+            count += 1
+        print(f"  {source} 导入完成: {count} 条")
+
     conn.commit()
     conn.close()
-    print(f"导入完成: {len(data)} 条")
+    print("全部导入完成")
 
 init_gallery()
 
@@ -63,16 +94,20 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .header{padding:20px;text-align:center}
 .header h1{font-size:1.8em}
 .header p{color:#94a3b8;margin-top:5px}
-.search-box{display:flex;justify-content:center;padding:0 20px 20px;gap:10px}
-.search-box input{padding:10px 15px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;width:300px;font-size:1em}
-.search-box button{padding:10px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;cursor:pointer}
+.toolbar{display:flex;justify-content:center;align-items:center;gap:10px;padding:0 20px 20px;flex-wrap:wrap}
+.search-box input{padding:10px 15px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;width:250px;font-size:1em}
+.search-box button,.source-tag{padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:.9em}
+.search-box button{background:#6366f1;color:#fff}
+.source-tag{background:#1e293b;color:#94a3b8;transition:all .2s}
+.source-tag.active{background:#6366f1;color:#fff}
 .grid{columns:4 260px;gap:12px;padding:0 12px 12px}
-.card{break-inside:avoid;margin-bottom:12px;background:#1e293b;border-radius:12px;overflow:hidden;transition:transform .2s}
+.card{break-inside:avoid;margin-bottom:12px;background:#1e293b;border-radius:12px;overflow:hidden;transition:transform .2s;position:relative}
 .card:hover{transform:scale(1.02)}
 .card img{width:100%;display:block;border-radius:12px 12px 0 0}
 .card .info{padding:12px;cursor:pointer}
 .card .prompt{font-size:.8em;color:#cbd5e1;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}
 .card .meta{font-size:.7em;color:#64748b;display:flex;justify-content:space-between}
+.card .source-badge{position:absolute;top:8px;left:8px;background:rgba(99,102,241,0.8);color:#fff;font-size:.65em;padding:2px 6px;border-radius:4px;z-index:10}
 .loading{text-align:center;padding:20px;color:#64748b}
 
 .lightbox{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:1000;display:none;justify-content:center;align-items:center;flex-direction:column}
@@ -81,16 +116,18 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .lightbox .lb-id{color:#fff;margin-top:15px;font-size:14px;background:rgba(255,255,255,0.1);padding:8px 16px;border-radius:8px}
 .lightbox .lb-prompt{color:#ccc;font-size:13px;max-width:80vw;margin-top:10px;text-align:center;line-height:1.4;cursor:pointer;padding:8px 12px;border-radius:8px;transition:background .2s}
 .lightbox .lb-prompt:hover{background:rgba(255,255,255,0.1)}
-
-.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s,.3s}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s}
 .toast.show{opacity:1}
 </style>
 </head>
 <body>
 <div class="header"><h1>🖼️ AI Gallery</h1><p id="count"></p></div>
-<div class="search-box">
-    <input type="text" id="s" placeholder="搜索 prompt...">
-    <button onclick="search()">搜索</button>
+<div class="toolbar">
+    <div class="search-box">
+        <input type="text" id="s" placeholder="搜索 prompt...">
+        <button onclick="search()">搜索</button>
+    </div>
+    <div id="source-tags"></div>
 </div>
 <div class="grid" id="g"></div>
 <div class="loading" id="ld">加载中...</div>
@@ -100,11 +137,10 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
     <div class="lb-id" id="lb-id"></div>
     <div class="lb-prompt" id="lb-prompt" onclick="event.stopPropagation();copyPrompt()"></div>
 </div>
-
 <div class="toast" id="toast">提示词已复制</div>
 
 <script>
-let page=0,loading=false,all=[],searchQuery='',lbIdx=-1;
+let page=0,loading=false,all=[],searchQuery='',lbIdx=-1,activeSources=[];
 let touchStartY=0;
 
 function showToast(){
@@ -117,9 +153,7 @@ function showToast(){
 function copyPrompt(){
     let d=all[lbIdx];
     if(d&&d.prompt){
-        navigator.clipboard.writeText(d.prompt).then(function(){
-            showToast();
-        });
+        navigator.clipboard.writeText(d.prompt).then(function(){showToast()});
     }
 }
 
@@ -127,7 +161,7 @@ function showLightbox(idx){
     lbIdx=idx;
     let d=all[idx];
     document.getElementById('lb-img').src=d.image_url;
-    document.getElementById('lb-id').innerText='ID: '+d.hash_id;
+    document.getElementById('lb-id').innerText=(d.source||'')+' | ID: '+d.hash_id;
     document.getElementById('lb-prompt').innerText=d.prompt||'';
     document.getElementById('lb').classList.add('active');
 }
@@ -149,7 +183,7 @@ function render(items,append){
     items.forEach(function(d,i){
         let c=document.createElement('div');
         c.className='card';
-        c.innerHTML='<img src="'+d.image_url+'" loading="lazy" onerror="this.style.display=\\'none\\'"><div class="info"><div class="prompt">'+(d.prompt||'')+'</div><div class="meta"><span>'+(d.model||'')+'</span><span>Seed:'+(d.seed||'')+'</span></div></div>';
+        c.innerHTML='<div class="source-badge">'+d.source+'</div><img src="'+d.image_url+'" loading="lazy" onerror="this.style.display=\\'none\\'"><div class="info"><div class="prompt">'+(d.prompt||'')+'</div><div class="meta"><span>'+(d.model||'')+'</span><span>Seed:'+(d.seed||'')+'</span></div></div>';
         c.querySelector('.prompt').addEventListener('click',function(e){
             e.stopPropagation();
             navigator.clipboard.writeText(d.prompt).then(function(){showToast()});
@@ -163,7 +197,8 @@ async function load(reset){
     if(loading)return;loading=true;
     if(reset){page=0;all=[];document.getElementById('g').innerHTML='';}
     let s=document.getElementById('s').value;
-    let res=await fetch('/api/images?page='+page+'&search='+encodeURIComponent(s),{credentials:'include'});
+    let srcParam = activeSources.length>0 ? '&sources='+activeSources.join(',') : '';
+    let res=await fetch('/api/images?page='+page+'&search='+encodeURIComponent(s)+srcParam,{credentials:'include'});
     let d=await res.json();
     if(reset)document.getElementById('count').innerText='共 '+d.total+' 张';
     all=reset?d.images:all.concat(d.images);
@@ -176,6 +211,37 @@ window.addEventListener('scroll',os);
 
 function search(){searchQuery=document.getElementById('s').value;load(true)}
 
+function toggleSource(src){
+    let idx=activeSources.indexOf(src);
+    if(idx>=0)activeSources.splice(idx,1);
+    else activeSources.push(src);
+    renderSourceTags();
+    load(true);
+}
+
+function renderSourceTags(){
+    let container=document.getElementById('source-tags');
+    container.innerHTML='';
+    fetch('/api/sources',{credentials:'include'}).then(r=>r.json()).then(function(data){
+        data.sources.forEach(function(src){
+            let btn=document.createElement('button');
+            btn.className='source-tag'+(activeSources.length===0||activeSources.includes(src)?' active':'');
+            btn.innerText=src;
+            btn.onclick=function(){toggleSource(src)};
+            container.appendChild(btn);
+        });
+        // "全部"按钮
+        if(data.sources.length>1){
+            let allBtn=document.createElement('button');
+            allBtn.className='source-tag'+(activeSources.length===0?' active':'');
+            allBtn.innerText='全部';
+            allBtn.onclick=function(){activeSources=[];renderSourceTags();load(true)};
+            container.insertBefore(allBtn,container.firstChild);
+        }
+    });
+}
+
+renderSourceTags();
 load(true);
 </script>
 </body>
@@ -186,14 +252,39 @@ async def index():
     return HTMLResponse(content=HTML)
 
 @app.get("/api/images")
-async def get_images(page: int = Query(0), search: str = Query(""), limit: int = Query(20)):
+async def get_images(page: int = Query(0), search: str = Query(""), limit: int = Query(20), sources: str = Query("")):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+
+    source_list = [s.strip() for s in sources.split(",") if s.strip()] if sources else []
+
+    where_parts = []
+    params = []
+
     if search:
-        total = conn.execute("SELECT COUNT(*) as t FROM images WHERE prompt LIKE ?", (f"%{search}%",)).fetchone()["t"]
-        rows = conn.execute("SELECT hash_id, image_url, prompt, model, seed FROM images WHERE prompt LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?", (f"%{search}%", limit, page * limit)).fetchall()
-    else:
-        total = conn.execute("SELECT COUNT(*) as t FROM images").fetchone()["t"]
-        rows = conn.execute("SELECT hash_id, image_url, prompt, model, seed FROM images ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, page * limit)).fetchall()
+        where_parts.append("prompt LIKE ?")
+        params.append(f"%{search}%")
+
+    if source_list:
+        placeholders = ",".join(["?" for _ in source_list])
+        where_parts.append(f"source IN ({placeholders})")
+        params.extend(source_list)
+
+    where_clause = " AND ".join(where_parts) if where_parts else "1=1"
+
+    total = conn.execute(f"SELECT COUNT(*) as t FROM images WHERE {where_clause}", params).fetchone()["t"]
+    rows = conn.execute(
+        f"SELECT * FROM images WHERE {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+        params + [limit, page * limit]
+    ).fetchall()
     conn.close()
+
     return {"total": total, "page": page, "has_more": (page + 1) * limit < total, "images": [dict(r) for r in rows]}
+
+@app.get("/api/sources")
+async def get_sources():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.execute("SELECT DISTINCT source FROM images ORDER BY source")
+    sources = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return {"sources": sources}
