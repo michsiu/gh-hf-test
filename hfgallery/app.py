@@ -14,18 +14,15 @@ def init_gallery():
     if os.path.exists(DB_PATH):
         return
     print("下载 JSON 数据...")
-    
     headers = {}
     token = os.environ.get("GITHUB_TOKEN", "")
     if token:
         headers["Authorization"] = f"token {token}"
-    
     resp = requests.get(JSON_URL, headers=headers)
     print(f"状态码: {resp.status_code}")
     if resp.status_code != 200:
         print(f"错误: {resp.text[:500]}")
         return
-    
     data = resp.json()
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
@@ -43,13 +40,11 @@ def init_gallery():
     for hash_id, item in data.items():
         panel = item.get("imagePanels", [{}])[0]
         gen_images = panel.get("generatedImages", [{}])[0]
-        conn.execute(
-            "INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?,?)",
+        conn.execute("INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?,?)",
             (hash_id, item.get("createdAt", ""), item.get("imageUrl", ""),
              panel.get("prompt", ""),
              item.get("genInfo", {}).get("modelInput", {}).get("modelNameType", ""),
-             gen_images.get("seed", 0), item.get("imgList", ""))
-        )
+             gen_images.get("seed", 0), item.get("imgList", "")))
     conn.commit()
     conn.close()
     print(f"导入完成: {len(data)} 条")
@@ -63,156 +58,99 @@ HTML = """<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Gallery</title>
 <style>
-    body { background: #0f172a; color: #e2e8f0; font-family: -apple-system, sans-serif; margin: 0; }
-    .header { padding: 20px; text-align: center; }
-    .header h1 { font-size: 1.8em; margin: 0; }
-    .header p { color: #94a3b8; margin-top: 5px; }
-    .search-box { display: flex; justify-content: center; padding: 0 20px 20px; gap: 10px; }
-    .search-box input { padding: 10px 15px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #e2e8f0; width: 300px; font-size: 1em; }
-    .search-box button { padding: 10px 20px; border-radius: 8px; border: none; background: #6366f1; color: #fff; cursor: pointer; }
-    .grid-container { margin: 0 auto; padding: 10px; }
-    .grid-item { position: relative; margin-bottom: 10px; border-radius: 10px; overflow: hidden; }
-    .grid-item .img-content { width: 100%; height: auto; border-radius: 10px; box-shadow: 0px 5px 10px rgba(0,0,0,0.3); cursor: pointer; display: block; }
-    .grid-item .image-id, .grid-item .image-info, .grid-item .hidden-info { display: none; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
+.header{padding:20px;text-align:center}
+.header h1{font-size:1.8em}
+.header p{color:#94a3b8;margin-top:5px}
+.search-box{display:flex;justify-content:center;padding:0 20px 20px;gap:10px}
+.search-box input{padding:10px 15px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;width:300px;font-size:1em}
+.search-box button{padding:10px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;cursor:pointer}
+.grid{columns:4 260px;gap:12px;padding:0 12px 12px}
+.card{break-inside:avoid;margin-bottom:12px;background:#1e293b;border-radius:12px;overflow:hidden;transition:transform .2s}
+.card:hover{transform:scale(1.02)}
+.card img{width:100%;display:block;border-radius:12px 12px 0 0}
+.card .info{padding:12px}
+.card .prompt{font-size:.8em;color:#cbd5e1;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}
+.card .meta{font-size:.7em;color:#64748b;display:flex;justify-content:space-between}
+.loading{text-align:center;padding:20px;color:#64748b}
 
-    .image-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; display: none; justify-content: center; align-items: center; flex-direction: column; }
-    .image-overlay.active { display: flex; }
-    #overlayimage-container { max-width: 95vw; display: flex; flex-direction: column; align-items: center; }
-    #overlay-image { max-height: 85vh; max-width: 95vw; border-radius: 10px; }
-    #overlay-id { color: #fff; margin-top: 15px; font-size: 14px; background: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 8px; cursor: pointer; }
-    #overlay-info { color: #fff; font-size: 14px; max-width: 80vw; margin-top: 10px; text-align: center; }
+.lightbox{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:1000;display:none;justify-content:center;align-items:center;flex-direction:column}
+.lightbox.active{display:flex}
+.lightbox img{max-height:85vh;max-width:95vw;border-radius:10px}
+.lightbox .lb-id{color:#fff;margin-top:15px;font-size:14px;background:rgba(255,255,255,0.1);padding:8px 16px;border-radius:8px}
+.lightbox .lb-prompt{color:#ccc;font-size:13px;max-width:80vw;margin-top:10px;text-align:center;line-height:1.4}
 </style>
 </head>
 <body>
-<div class="header"><h1>🖼️ AI Gallery</h1><p id="count">加载中...</p></div>
+<div class="header"><h1>🖼️ AI Gallery</h1><p id="count"></p></div>
 <div class="search-box">
     <input type="text" id="s" placeholder="搜索 prompt...">
-    <button onclick="searchImages()">搜索</button>
+    <button onclick="search()">搜索</button>
 </div>
-<div class="grid-container" id="grid"></div>
+<div class="grid" id="g"></div>
+<div class="loading" id="ld">加载中...</div>
 
-<div class="image-overlay" id="overlay">
-    <div id="overlayimage-container">
-        <img id="overlay-image">
-    </div>
-    <div id="overlay-id"></div>
-    <div id="overlay-info"></div>
+<div class="lightbox" id="lb" onclick="this.classList.remove('active')">
+    <img id="lb-img" onclick="event.stopPropagation()">
+    <div class="lb-id" id="lb-id"></div>
+    <div class="lb-prompt" id="lb-prompt"></div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/macy@2"></script>
 <script>
-var macyInstance;
-var allImages = __INIT_DATA__;
-var currentPage = 1;
-var currentOverlayIndex = -1;
-var searchQuery = '';
+let page=0,loading=false,all=[],searchQuery='',lbIdx=-1;
 
-function initMacy() {
-    if (macyInstance) macyInstance.remove();
-    macyInstance = Macy({
-        container: '#grid',
-        trueOrder: false,
-        waitForImages: false,
-        margin: 10,
-        columns: 4,
-        breakAt: { 1200: 3, 768: 2, 480: 1 }
-    });
+function showLightbox(idx){
+    lbIdx=idx;
+    let d=all[idx];
+    document.getElementById('lb-img').src=d.image_url;
+    document.getElementById('lb-id').innerText='ID: '+d.hash_id;
+    document.getElementById('lb-prompt').innerText=d.prompt||'';
+    document.getElementById('lb').classList.add('active');
 }
 
-function renderCards(items) {
-    var grid = document.getElementById('grid');
-    items.forEach(function(item) {
-        var div = document.createElement('div');
-        div.className = 'grid-item';
-        div.innerHTML = item.img_html;
-        grid.appendChild(div);
-    });
-    // 绑定点击事件
-    var imgs = document.querySelectorAll('.grid-item .img-content');
-    imgs.forEach(function(img, idx) {
-        img.addEventListener('click', function() {
-            openOverlay(idx);
-        });
-    });
-    initMacy();
-    macyInstance.recalculate(true);
-}
-
-function openOverlay(idx) {
-    currentOverlayIndex = idx;
-    var allImgs = document.querySelectorAll('.grid-item .img-content');
-    var img = allImgs[idx];
-    document.getElementById('overlay-image').src = img.src;
-    document.getElementById('overlay-id').innerText = 'ID: ' + (allImages[idx] ? allImages[idx].hash_id : '');
-    document.getElementById('overlay-info').innerText = allImages[idx] ? allImages[idx].prompt || '' : '';
-    document.getElementById('overlay').classList.add('active');
-}
-
-document.getElementById('overlay').addEventListener('click', function(e) {
-    if (e.target === this) {
-        this.classList.remove('active');
-    }
-});
-
-// 滑动切换
-var touchStartY = 0;
-document.getElementById('overlay-image').addEventListener('touchstart', function(e) {
-    touchStartY = e.touches[0].clientY;
+function touchStartY=0;
+document.getElementById('lb-img').addEventListener('touchstart',function(e){
+    touchStartY=e.touches[0].clientY;
     e.stopPropagation();
 });
-document.getElementById('overlay-image').addEventListener('touchend', function(e) {
-    var deltaY = e.changedTouches[0].clientY - touchStartY;
-    var allImgs = document.querySelectorAll('.grid-item .img-content');
-    if (deltaY > 50 && currentOverlayIndex > 0) {
-        openOverlay(currentOverlayIndex - 1);
-    } else if (deltaY < -50 && currentOverlayIndex < allImgs.length - 1) {
-        openOverlay(currentOverlayIndex + 1);
-    }
+document.getElementById('lb-img').addEventListener('touchend',function(e){
+    let d=e.changedTouches[0].clientY-touchStartY;
+    if(d>50&&lbIdx>0)showLightbox(lbIdx-1);
+    if(d<-50&&lbIdx<all.length-1)showLightbox(lbIdx+1);
     e.stopPropagation();
 });
 
-// 搜索
-async function searchImages() {
-    searchQuery = document.getElementById('s').value;
-    currentPage = 0;
-    document.getElementById('grid').innerHTML = '';
-    allImages = [];
-    await loadMore();
+function render(items,append){
+    let g=document.getElementById('g');
+    if(!append)g.innerHTML='';
+    items.forEach(function(d,i){
+        let c=document.createElement('div');
+        c.className='card';
+        c.innerHTML='<img src="'+d.image_url+'" loading="lazy" onerror="this.style.display=\\'none\\'"><div class="info"><div class="prompt">'+(d.prompt||'')+'</div><div class="meta"><span>'+(d.model||'')+'</span><span>Seed:'+(d.seed||'')+'</span></div></div>';
+        c.addEventListener('click',function(){showLightbox(append?all.length-items.length+i:i)});
+        g.appendChild(c);
+    });
 }
 
-// 无限滚动
-var loading = false;
-async function loadMore() {
-    if (loading) return;
-    loading = true;
-    var url = '/api/images?page=' + currentPage + '&search=' + encodeURIComponent(searchQuery);
-    var res = await fetch(url, { credentials: 'include' });
-    var d = await res.json();
-    allImages = allImages.concat(d.images);
-    renderCards(d.images);
-    currentPage++;
-    loading = false;
-    document.getElementById('count').innerText = '共 ' + d.total + ' 张';
-    if (!d.has_more) window.removeEventListener('scroll', onScroll);
+async function load(reset){
+    if(loading)return;loading=true;
+    if(reset){page=0;all=[];document.getElementById('g').innerHTML='';}
+    let s=document.getElementById('s').value;
+    let res=await fetch('/api/images?page='+page+'&search='+encodeURIComponent(s),{credentials:'include'});
+    let d=await res.json();
+    if(reset)document.getElementById('count').innerText='共 '+d.total+' 张';
+    all=reset?d.images:all.concat(d.images);
+    render(d.images,!reset);
+    page++;loading=false;
+    if(!d.has_more){document.getElementById('ld').style.display='none';window.removeEventListener('scroll',os)}
 }
-function onScroll() {
-    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) loadMore();
-}
-window.addEventListener('scroll', onScroll);
+function os(){if(window.innerHeight+window.scrollY>=document.body.offsetHeight-500)load(false)}
+window.addEventListener('scroll',os);
 
-// 初始加载
-// 等 Macy 加载完再初始化
-function waitForMacy(callback) {
-    if (typeof Macy !== 'undefined') {
-        callback();
-    } else {
-        setTimeout(function() { waitForMacy(callback); }, 100);
-    }
-}
-waitForMacy(function() {
-    renderCards(INIT_DATA);
-    loadMore();
-});
+function search(){searchQuery=document.getElementById('s').value;load(true)}
+
+load(true);
 </script>
 </body>
 </html>"""
@@ -221,13 +159,21 @@ waitForMacy(function() {
 async def index():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT hash_id, prompt, img_html FROM images ORDER BY created_at DESC LIMIT 20"
-    ).fetchall()
+    rows = conn.execute("SELECT hash_id, image_url, prompt, model, seed FROM images ORDER BY created_at DESC LIMIT 20").fetchall()
+    total = conn.execute("SELECT COUNT(*) as t FROM images").fetchone()["t"]
     conn.close()
-    
-    init_data = json.dumps([dict(r) for r in rows], ensure_ascii=False)
-    print(f"INIT_DATA 长度: {len(init_data)}")
-    print(f"前100字符: {init_data[:100]}")
-    html = HTML.replace("__INIT_DATA__", init_data)
-    return HTMLResponse(content=html)
+    init_data = json.dumps({"total": total, "images": [dict(r) for r in rows]}, ensure_ascii=False)
+    return HTMLResponse(content=HTML.replace("/*INIT*/", "").replace("__TOTAL__", str(total)))
+
+@app.get("/api/images")
+async def get_images(page: int = Query(0), search: str = Query(""), limit: int = Query(20)):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    if search:
+        total = conn.execute("SELECT COUNT(*) as t FROM images WHERE prompt LIKE ?", (f"%{search}%",)).fetchone()["t"]
+        rows = conn.execute("SELECT hash_id, image_url, prompt, model, seed FROM images WHERE prompt LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?", (f"%{search}%", limit, page * limit)).fetchall()
+    else:
+        total = conn.execute("SELECT COUNT(*) as t FROM images").fetchone()["t"]
+        rows = conn.execute("SELECT hash_id, image_url, prompt, model, seed FROM images ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, page * limit)).fetchall()
+    conn.close()
+    return {"total": total, "page": page, "has_more": (page + 1) * limit < total, "images": [dict(r) for r in rows]}
