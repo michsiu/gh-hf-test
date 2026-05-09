@@ -150,7 +150,17 @@ window.addEventListener('scroll', onScroll);
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return HTMLResponse(content=HTML)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT hash_id, img_html FROM images ORDER BY created_at DESC LIMIT 20"
+    ).fetchall()
+    total = conn.execute("SELECT COUNT(*) as t FROM images").fetchone()["t"]
+    conn.close()
+    
+    init_data = json.dumps([dict(r) for r in rows], ensure_ascii=False)
+    html = HTML.replace("__INIT_DATA__", init_data)
+    return HTMLResponse(content=html)
 
 @app.get("/api/images")
 async def get_images(page: int = Query(0), search: str = Query(""), limit: int = Query(20)):
