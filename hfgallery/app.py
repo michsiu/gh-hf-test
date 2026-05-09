@@ -64,9 +64,16 @@ def init_gallery():
                 gi = item["genInfo"]
                 if isinstance(gi, dict):
                     prompt = gi.get("prompt", "")
+                    # Whisks 格式: modelInput.modelNameType
                     mi = gi.get("modelInput")
-                    if isinstance(mi, dict):
-                        model = mi.get("modelNameType", "")
+                    if isinstance(mi, dict) and mi.get("modelNameType"):
+                        model = mi["modelNameType"]
+                    # LibLib 格式: metainformation
+                    elif "metainformation" in gi:
+                        meta = gi.get("metainformation", "")
+                        m = re.search(r'Model:\s*([^,\n]+)', meta)
+                        if m:
+                            model = m.group(1).strip()
                     seed = gi.get("seed", 0)
             elif "imagePanels" in item:
                 panel = item.get("imagePanels", [{}])[0]
@@ -223,7 +230,6 @@ function loadFilters(){
             let container=document.getElementById(type+'-tags');
             container.innerHTML='';
             let values=type==='source'?data.sources:data.models;
-            // 全部按钮
             let allBtn=document.createElement('button');allBtn.className='filter-tag active';allBtn.dataset.value='';allBtn.innerText='全部';
             allBtn.onclick=function(){if(type==='source'){activeSources=[]}else{activeModels=[]}renderTags(type);load(true)};
             container.appendChild(allBtn);
@@ -259,7 +265,6 @@ async def get_images(page: int = Query(0), search: str = Query(""), limit: int =
     params = []
 
     if search:
-        # 全词匹配：英文用单词边界，中文用LIKE
         words = search.strip().split()
         word_clauses = []
         for w in words:
