@@ -201,8 +201,18 @@ function onScroll() {
 window.addEventListener('scroll', onScroll);
 
 // 初始加载
-renderCards(INIT_DATA);
-loadMore();
+// 等 Macy 加载完再初始化
+function waitForMacy(callback) {
+    if (typeof Macy !== 'undefined') {
+        callback();
+    } else {
+        setTimeout(function() { waitForMacy(callback); }, 100);
+    }
+}
+waitForMacy(function() {
+    renderCards(INIT_DATA);
+    loadMore();
+});
 </script>
 </body>
 </html>"""
