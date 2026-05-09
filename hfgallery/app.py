@@ -696,6 +696,7 @@ const observer = new IntersectionObserver((entries, observer) => {
 
 
 },500);
+}
 
 
 
