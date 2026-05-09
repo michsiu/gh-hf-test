@@ -14,7 +14,19 @@ def init_gallery():
     if os.path.exists(DB_PATH):
         return
     print("下载 JSON 数据...")
-    data = requests.get(JSON_URL).json()
+    
+    headers = {}
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"token {token}"
+    
+    resp = requests.get(JSON_URL, headers=headers)
+    print(f"状态码: {resp.status_code}")
+    if resp.status_code != 200:
+        print(f"错误: {resp.text[:500]}")
+        return
+    
+    data = resp.json()
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS images (
