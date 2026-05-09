@@ -227,17 +227,7 @@ async def index():
     conn.close()
     
     init_data = json.dumps([dict(r) for r in rows], ensure_ascii=False)
+    print(f"INIT_DATA 长度: {len(init_data)}")
+    print(f"前100字符: {init_data[:100]}")
     html = HTML.replace("__INIT_DATA__", init_data)
     return HTMLResponse(content=html)
-@app.get("/api/images")
-async def get_images(page: int = Query(0), search: str = Query(""), limit: int = Query(20)):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    if search:
-        total = conn.execute("SELECT COUNT(*) as t FROM images WHERE prompt LIKE ?", (f"%{search}%",)).fetchone()["t"]
-        rows = conn.execute("SELECT * FROM images WHERE prompt LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?", (f"%{search}%", limit, page * limit)).fetchall()
-    else:
-        total = conn.execute("SELECT COUNT(*) as t FROM images").fetchone()["t"]
-        rows = conn.execute("SELECT * FROM images ORDER BY created_at DESC LIMIT ? OFFSET ?", (limit, page * limit)).fetchall()
-    conn.close()
-    return {"total": total, "page": page, "has_more": (page + 1) * limit < total, "images": [dict(r) for r in rows]}
