@@ -1,0 +1,18 @@
+name: Deploy AI Gallery to HF Space
+on: workflow_dispatch
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.10' }
+      - run: pip install huggingface_hub
+      - env: { HF_TOKEN: "${{ secrets.HF_TOKEN }}" }
+        run: |
+          python -c "
+          from huggingface_hub import HfApi
+          api = HfApi(token=os.environ['HF_TOKEN'])
+          api.upload_folder(folder_path='hfgallery', repo_id='micsir/ai-gallery', repo_type='space')
+          print('完成')
+          "
