@@ -5,7 +5,7 @@ import requests
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
-JSON_URL = "https://raw.githubusercontent.com/michsiu/你的仓库/main/你的文件.json"
+JSON_URL = "https://raw.githubusercontent.com/michsiu/liblib/main/WhiskTasks/WhiskTasks.json"
 DB_PATH = "/tmp/gallery.db"
 
 app = FastAPI()
