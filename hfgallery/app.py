@@ -118,8 +118,9 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .dropdown-btn{padding:8px 14px;border-radius:10px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;cursor:pointer;font-size:.85em;display:flex;align-items:center;gap:6px;white-space:nowrap}
 .dropdown-btn::after{content:'▾';font-size:.7em;color:#64748b}
 .dropdown-btn.active{border-color:#6366f1}
-.dropdown-menu{display:none;position:absolute;top:100%;left:0;margin-top:4px;background:#1e293b;border:1px solid #334155;border-radius:10px;min-width:220px;max-height:260px;overflow-y:auto;z-index:100;padding:4px}
+.dropdown-menu{display:none;position:absolute;top:100%;right:0;margin-top:4px;background:#1e293b;border:1px solid #334155;border-radius:10px;min-width:200px;max-width:280px;max-height:260px;overflow-y:auto;z-index:100;padding:4px}
 .dropdown-menu.show{display:block}
+.dropdown-menu .select-all{border-bottom:1px solid #334155;margin-bottom:4px;padding-bottom:6px}
 .dropdown-menu label{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:6px;cursor:pointer;font-size:.8em;color:#cbd5e1;transition:background .15s}
 .dropdown-menu label:hover{background:rgba(99,102,241,.15)}
 .dropdown-menu input[type=checkbox]{accent-color:#6366f1;width:14px;height:14px}
@@ -154,8 +155,8 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
     <div class="filter-row">
         <div class="source-tags" id="source-tags"></div>
         <div class="dropdown" id="model-dropdown">
-            <button class="dropdown-btn" id="model-btn" onclick="toggleDropdown('model')">模型 ▾</button>
-            <div class="dropdown-menu" id="model-menu"></div>
+            <button class="dropdown-btn" id="model-btn" onclick="event.stopPropagation();toggleDropdown('model')">模型 ▾</button>
+            <div class="dropdown-menu" id="model-menu" onclick="event.stopPropagation()"></div>
         </div>
     </div>
 </div>
@@ -254,7 +255,6 @@ function renderSourceTags(){
         btn.onclick=function(){toggleSource(s)};
         container.appendChild(btn);
     });
-    // 高亮
     let isAll=activeSources.length===0||activeSources.length===(modelData._allSources||[]).length;
     container.querySelectorAll('.source-tag').forEach(function(b,i){
         if(i===0) b.classList.toggle('active',isAll);
@@ -266,6 +266,18 @@ function toggleModel(m){
     let i=activeModels.indexOf(m);
     if(i>=0)activeModels.splice(i,1);
     else activeModels.push(m);
+    renderDropdown('model');
+    load(true);
+}
+
+function selectAllModels(checked){
+    let menu=document.getElementById('model-menu');
+    if(checked){
+        let boxes=menu.querySelectorAll('input[type=checkbox]');
+        activeModels=Array.from(boxes).map(function(cb){return cb.value}).filter(function(v){return v});
+    }else{
+        activeModels=[];
+    }
     renderDropdown('model');
     load(true);
 }
@@ -282,23 +294,34 @@ function renderDropdown(type){
     let map={};models.forEach(function(m){if(!map[m.name])map[m.name]=m.count;else map[m.name]+=m.count});
     let unique=Object.keys(map).map(function(k){return{name:k,count:map[k]}});
     unique.sort(function(a,b){return b.count-a.count});
+
+    // 全部选项
+    let allLabel=document.createElement('label');
+    allLabel.className='select-all';
+    let allChecked=activeModels.length===0||activeModels.length===unique.length;
+    allLabel.innerHTML='<input type="checkbox" '+(allChecked?'checked':'')+'><b>全部</b><span class="count">'+unique.reduce(function(s,m){return s+m.count},0)+'</span>';
+    allLabel.querySelector('input').addEventListener('change',function(){selectAllModels(this.checked)});
+    menu.appendChild(allLabel);
+
     unique.forEach(function(m){
         let label=document.createElement('label');
         let displayName=m.name.length>20?m.name.substring(0,20)+'…':m.name;
-        label.innerHTML='<input type="checkbox" value="'+m.name.replace(/"/g,'&quot;')+'" '+(activeModels.includes(m.name)?'checked':'')+'><span title="'+m.name.replace(/"/g,'&quot;')+'">'+displayName+'</span><span class="count">'+m.count+'</span>';
+        label.innerHTML='<input type="checkbox" value="'+m.name.replace(/"/g,'&quot;')+'" '+(activeModels.length===0||activeModels.includes(m.name)?'checked':'')+'><span title="'+m.name.replace(/"/g,'&quot;')+'">'+displayName+'</span><span class="count">'+m.count+'</span>';
         label.querySelector('input').addEventListener('change',function(){toggleModel(m.name)});
         menu.appendChild(label);
     });
-    // 更新按钮文字
+
     let btn=document.getElementById(type+'-btn');
-    if(activeModels.length===0)btn.innerHTML='模型 ▾';
+    if(activeModels.length===0||activeModels.length===unique.length)btn.innerHTML='模型 ▾';
     else btn.innerHTML='模型 ('+activeModels.length+') ▾';
-    btn.classList.toggle('active',activeModels.length>0);
+    btn.classList.toggle('active',activeModels.length>0&&activeModels.length<unique.length);
 }
 
 function toggleDropdown(type){
     let menu=document.getElementById(type+'-menu');
-    menu.classList.toggle('show');
+    let was=menu.classList.contains('show');
+    document.querySelectorAll('.dropdown-menu').forEach(function(m){m.classList.remove('show')});
+    if(!was)menu.classList.add('show');
 }
 document.addEventListener('click',function(e){
     if(!e.target.closest('.dropdown')){
