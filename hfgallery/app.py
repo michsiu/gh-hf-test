@@ -57,17 +57,96 @@ def init_gallery():
 init_gallery()
 
 HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Gallery</title>
-<style>*{margin:0;padding:0;box-sizing:border-box}body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}.header{padding:20px;text-align:center}.header h1{font-size:1.8em}.header p{color:#94a3b8;margin-top:5px}.grid{columns:4 260px;gap:16px;padding:16px}.card{break-inside:avoid;margin-bottom:16px;background:#1e293b;border-radius:12px;overflow:hidden;transition:transform .2s}.card:hover{transform:scale(1.02)}.card img{width:100%;display:block}.card .info{padding:12px}.card .prompt{font-size:.8em;color:#cbd5e1;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}.card .meta{font-size:.7em;color:#64748b;display:flex;justify-content:space-between}.search-box{display:flex;justify-content:center;padding:0 20px 20px;gap:10px}.search-box input{padding:10px 15px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;width:300px;font-size:1em}.search-box button{padding:10px 20px;border-radius:8px;border:none;background:#6366f1;color:#fff;cursor:pointer}.loading{text-align:center;padding:20px;color:#64748b}</style></head>
-<body><div class="header"><h1>🖼️ AI Gallery</h1><p id="count">加载中...</p></div>
-<div class="search-box"><input type="text" id="s" placeholder="搜索 prompt..."><button onclick="l(1)">搜索</button></div>
-<div class="grid" id="g"></div><div class="loading" id="ld">加载中...</div>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Gallery</title>
+<style>
+    body { background: #0f172a; color: #e2e8f0; font-family: -apple-system, sans-serif; margin: 0; }
+    .header { padding: 20px; text-align: center; }
+    .header h1 { font-size: 1.8em; margin: 0; }
+    .header p { color: #94a3b8; margin-top: 5px; }
+    .grid-container { columns: 4 260px; gap: 10px; padding: 10px; }
+    .grid-item { position: relative; break-inside: avoid; margin-bottom: 10px; border-radius: 10px; overflow: hidden; cursor: pointer; }
+    .img-content { width: 100%; height: auto; border-radius: 10px; box-shadow: 0px 5px 10px rgba(0,0,0,0.3); cursor: pointer; display: block; }
+    .image-id, .image-info { display: none; }
+
+    /* overlay */
+    .image-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 1000; display: none; justify-content: center; align-items: center; flex-direction: column; }
+    .image-overlay.active { display: flex; }
+    #overlayimage-container { display: flex; flex-direction: column; align-items: center; max-width: 95vw; }
+    #overlay-image { max-height: 85vh; max-width: 95vw; border-radius: 10px; transition: transform 0.3s; }
+    #overlay-id { color: #fff; margin-top: 15px; font-size: 14px; background: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 8px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>🖼️ AI Gallery</h1>
+    <p id="count">加载中...</p>
+</div>
+<div class="grid-container" id="grid"></div>
+
+<div class="image-overlay" id="overlay">
+    <div id="overlayimage-container">
+        <img id="overlay-image">
+    </div>
+    <div id="overlay-id"></div>
+</div>
+
 <script>
-let p=0,b=!1;
-async function l(r){if(b)return;b=!0;if(r){p=0;g.innerHTML=''}let s=document.getElementById('s').value;let res=await fetch(`/api/images?page=${p}&search=${encodeURIComponent(s)}`);let d=await res.json();if(r)document.getElementById('count').innerText=`共 ${d.total} 张`;for(let i of d.images){let c=document.createElement('div');c.className='card';c.innerHTML=`<img src="${i.image_url}" loading="lazy" onerror="this.style.display='none'"><div class="info"><div class="prompt">${i.prompt||''}</div><div class="meta"><span>${i.model||''}</span><span>Seed:${i.seed||''}</span></div></div>`;g.appendChild(c)}p++;b=!1;if(!d.has_more){ld.style.display='none';window.removeEventListener('scroll',os)}}
-function os(){if(window.innerHeight+window.scrollY>=document.body.offsetHeight-500)l(0)}
-window.addEventListener('scroll',os);l(1);
-</script></body></html>"""
+const INIT_DATA = __INIT_DATA__;
+
+function renderCard(item) {
+    let div = document.createElement('div');
+    div.className = 'grid-item';
+    div.innerHTML = item.img_html;
+    // 绑定点击
+    let img = div.querySelector('.img-content');
+    if (img) {
+        img.addEventListener('click', function() {
+            openOverlay(this.src, item.hash_id);
+        });
+    }
+    return div;
+}
+
+function openOverlay(src, id) {
+    document.getElementById('overlay-image').src = src;
+    document.getElementById('overlay-id').innerText = id;
+    document.getElementById('overlay').classList.add('active');
+}
+
+document.getElementById('overlay').addEventListener('click', function(e) {
+    if (e.target === this || e.target.id === 'overlay-image') {
+        this.classList.remove('active');
+    }
+});
+
+// 初始渲染
+let grid = document.getElementById('grid');
+INIT_DATA.forEach(item => grid.appendChild(renderCard(item)));
+document.getElementById('count').innerText = '共 ' + INIT_DATA.length + ' 张';
+
+// 无限滚动
+let page = 1, loading = false;
+async function loadMore() {
+    if (loading) return;
+    loading = true;
+    let res = await fetch('/api/images?page=' + page, { credentials: 'include' });
+    let d = await res.json();
+    d.images.forEach(item => grid.appendChild(renderCard(item)));
+    page++;
+    loading = false;
+    if (!d.has_more) window.removeEventListener('scroll', onScroll);
+}
+function onScroll() {
+    if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 500) loadMore();
+}
+window.addEventListener('scroll', onScroll);
+</script>
+</body>
+</html>"""
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
