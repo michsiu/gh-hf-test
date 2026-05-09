@@ -70,7 +70,7 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .card{break-inside:avoid;margin-bottom:12px;background:#1e293b;border-radius:12px;overflow:hidden;transition:transform .2s}
 .card:hover{transform:scale(1.02)}
 .card img{width:100%;display:block;border-radius:12px 12px 0 0}
-.card .info{padding:12px}
+.card .info{padding:12px;cursor:pointer}
 .card .prompt{font-size:.8em;color:#cbd5e1;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:8px}
 .card .meta{font-size:.7em;color:#64748b;display:flex;justify-content:space-between}
 .loading{text-align:center;padding:20px;color:#64748b}
@@ -79,7 +79,11 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 .lightbox.active{display:flex}
 .lightbox img{max-height:85vh;max-width:95vw;border-radius:10px}
 .lightbox .lb-id{color:#fff;margin-top:15px;font-size:14px;background:rgba(255,255,255,0.1);padding:8px 16px;border-radius:8px}
-.lightbox .lb-prompt{color:#ccc;font-size:13px;max-width:80vw;margin-top:10px;text-align:center;line-height:1.4}
+.lightbox .lb-prompt{color:#ccc;font-size:13px;max-width:80vw;margin-top:10px;text-align:center;line-height:1.4;cursor:pointer;padding:8px 12px;border-radius:8px;transition:background .2s}
+.lightbox .lb-prompt:hover{background:rgba(255,255,255,0.1)}
+
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#6366f1;color:#fff;padding:12px 24px;border-radius:8px;font-size:14px;z-index:9999;opacity:0;transition:opacity .3s,.3s}
+.toast.show{opacity:1}
 </style>
 </head>
 <body>
@@ -94,12 +98,30 @@ body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,sans-serif}
 <div class="lightbox" id="lb" onclick="this.classList.remove('active')">
     <img id="lb-img" onclick="event.stopPropagation()">
     <div class="lb-id" id="lb-id"></div>
-    <div class="lb-prompt" id="lb-prompt"></div>
+    <div class="lb-prompt" id="lb-prompt" onclick="event.stopPropagation();copyPrompt()"></div>
 </div>
+
+<div class="toast" id="toast">提示词已复制</div>
 
 <script>
 let page=0,loading=false,all=[],searchQuery='',lbIdx=-1;
 let touchStartY=0;
+
+function showToast(){
+    let t=document.getElementById('toast');
+    t.classList.add('show');
+    clearTimeout(t._timeout);
+    t._timeout=setTimeout(function(){t.classList.remove('show')},2000);
+}
+
+function copyPrompt(){
+    let d=all[lbIdx];
+    if(d&&d.prompt){
+        navigator.clipboard.writeText(d.prompt).then(function(){
+            showToast();
+        });
+    }
+}
 
 function showLightbox(idx){
     lbIdx=idx;
@@ -128,7 +150,11 @@ function render(items,append){
         let c=document.createElement('div');
         c.className='card';
         c.innerHTML='<img src="'+d.image_url+'" loading="lazy" onerror="this.style.display=\\'none\\'"><div class="info"><div class="prompt">'+(d.prompt||'')+'</div><div class="meta"><span>'+(d.model||'')+'</span><span>Seed:'+(d.seed||'')+'</span></div></div>';
-        c.addEventListener('click',function(){showLightbox(append?all.length-items.length+i:i)});
+        c.querySelector('.prompt').addEventListener('click',function(e){
+            e.stopPropagation();
+            navigator.clipboard.writeText(d.prompt).then(function(){showToast()});
+        });
+        c.querySelector('img').addEventListener('click',function(){showLightbox(append?all.length-items.length+i:i)});
         g.appendChild(c);
     });
 }
