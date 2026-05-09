@@ -1,8 +1,6 @@
-# ================== 后端 ==================
 import os
 import sqlite3
 import requests
-import asyncio
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 
@@ -12,120 +10,121 @@ DB_PATH = "/tmp/gallery.db"
 app = FastAPI()
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    return conn
-
-
-def init_gallery():
-    conn = get_conn()
-
+# ================= 数据库 =================
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS images (
-            hash_id TEXT PRIMARY KEY,
+            id TEXT PRIMARY KEY,
             created_at TEXT,
             image_url TEXT,
-            prompt TEXT,
-            model TEXT,
-            seed INTEGER
+            prompt TEXT
         )
     """)
+    conn.commit()
+    conn.close()
 
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON images(created_at DESC)")
+
+def load_data():
+    if os.path.exists(DB_PATH):
+        return
+
+    resp = requests.get(JSON_URL)
+    if resp.status_code != 200:
+        return
+
+    data = resp.json()
+    conn = sqlite3.connect(DB_PATH)
+
+    for k, v in data.items():
+        panel = v.get("imagePanels", [{}])[0]
+        conn.execute(
+            "INSERT OR REPLACE INTO images VALUES (?,?,?,?)",
+            (
+                k,
+                v.get("createdAt", ""),
+                v.get("imageUrl", ""),
+                panel.get("prompt", "")
+            )
+        )
 
     conn.commit()
     conn.close()
 
 
-async def load_data():
-    try:
-        resp = requests.get(JSON_URL)
-        if resp.status_code != 200:
-            print("加载失败")
-            return
-
-        data = resp.json()
-        conn = get_conn()
-
-        for hash_id, item in data.items():
-            panel = item.get("imagePanels", [{}])[0]
-            gen = panel.get("generatedImages", [{}])[0]
-
-            conn.execute("""
-                INSERT OR REPLACE INTO images VALUES (?,?,?,?,?,?)
-            """, (
-                hash_id,
-                item.get("createdAt", ""),
-                item.get("imageUrl", ""),
-                panel.get("prompt", ""),
-                item.get("genInfo", {}).get("modelInput", {}).get("modelNameType", ""),
-                gen.get("seed", 0),
-            ))
-
-        conn.commit()
-        conn.close()
-        print("✅ 数据加载完成")
-
-    except Exception as e:
-        print("❌ 错误:", e)
-
-
 @app.on_event("startup")
-async def startup():
-    init_gallery()
-    asyncio.create_task(load_data())
+def startup():
+    init_db()
+    load_data()
 
 
+# ================= API =================
 @app.get("/api/images")
-async def get_images(page: int = 0, search: str = "", limit: int = 20):
-    limit = min(limit, 50)
-    conn = get_conn()
+def get_images(page: int = 0, limit: int = 20, search: str = ""):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
 
     if search:
         rows = conn.execute("""
             SELECT * FROM images
             WHERE prompt LIKE ?
-            ORDER BY created_at DESC
             LIMIT ? OFFSET ?
         """, (f"%{search}%", limit, page * limit)).fetchall()
     else:
         rows = conn.execute("""
             SELECT * FROM images
-            ORDER BY created_at DESC
             LIMIT ? OFFSET ?
         """, (limit, page * limit)).fetchall()
 
     conn.close()
-
-    return {
-        "images": [dict(r) for r in rows],
-        "has_more": len(rows) == limit
-    }
+    return {"images": [dict(r) for r in rows]}
 
 
-# ================== 前端 ==================
-HTML = r"""
-<meta charset="utf-8">
+# ================= 前端 =================
+HTML = """
+<!DOCTYPE html>
 <html>
-<body style="background:#0f172a;color:white">
+<head>
+<meta charset="utf-8">
+<style>
+body {background:#111;color:#fff;font-family:sans-serif;}
+.grid {display:grid;grid-template-columns:repeat(auto-fill,200px);gap:10px;}
+.img-content {position:relative;}
+.img-content img {width:100%;border-radius:10px;cursor:pointer;}
+.image-info {display:none;position:absolute;bottom:0;background:rgba(0,0,0,0.7);width:100%;}
+.img-content.show-info .image-info {display:block;}
+#overlay {
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.9);
+    display:none;align-items:center;justify-content:center;
+}
+#overlay img {max-width:90%;max-height:90%;}
+</style>
+</head>
 
-<h2 style="text-align:center">AI Gallery</h2>
+<body>
 
-<div style="text-align:center">
-<input id="s">
-<button onclick="searchImages()">搜索</button>
+<input id="search" placeholder="搜索">
+<button onclick="doSearch()">搜索</button>
+
+<div id="grid" class="grid"></div>
+
+<div id="overlay">
+    <img id="overlayImage">
 </div>
-
-<div id="grid-container"></div>
-<div id="loadMore" style="height:50px"></div>
 
 <script>
 
-let page = 0;
-let loading = false;
-let keyword = "";
+let page=0;
+let keyword="";
+let loading=false;
+
+let images=[], imageInfos=[];
+
+const overlay=document.getElementById("overlay");
+const overlayImage=document.getElementById("overlayImage");
+
+overlay.onclick=()=>overlay.style.display="none";
 
 function escapeHTML(str){
     return str.replace(/[&<>"']/g, m => ({
@@ -134,75 +133,67 @@ function escapeHTML(str){
     }[m]));
 }
 
+function buildCard(item){
+    return `
+    <div class="img-content">
+        <img data-src="${item.image_url}">
+        <div class="image-info">${escapeHTML(item.prompt||"")}</div>
+    </div>
+    `;
+}
+
 async function load(){
     if(loading) return;
-    loading = true;
+    loading=true;
 
-    let url = `/api/images?page=${page}&search=${encodeURIComponent(keyword)}`;
-    let res = await fetch(url);
-    let data = await res.json();
+    let res=await fetch(`/api/images?page=${page}&search=${keyword}`);
+    let data=await res.json();
 
-    let grid = document.getElementById('grid-container');
+    let grid=document.getElementById("grid");
 
     data.images.forEach(item=>{
-        let div = document.createElement('div');
-        div.style.margin = "10px";
-
-        div.innerHTML = `
-            <img data-src="${item.image_url}" class="lazy" style="width:200px;border-radius:10px">
-            <div>${escapeHTML(item.prompt || "")}</div>
-        `;
-
+        let div=document.createElement("div");
+        div.innerHTML=buildCard(item);
         grid.appendChild(div);
     });
 
-    lazyLoad();
+    images=document.querySelectorAll(".img-content img");
+    imageInfos=document.querySelectorAll(".image-info");
 
-    if(data.has_more){
-        page++;
-    }
+    images.forEach((img,i)=>{
+        img.src=img.dataset.src;
 
-    loading = false;
-}
+        img.onclick=()=>{
+            overlay.style.display="flex";
+            overlayImage.src=img.src;
+        };
 
-function searchImages(){
-    keyword = document.getElementById("s").value;
-    page = 0;
-    document.getElementById("grid-container").innerHTML = "";
-    load();
-}
-
-function lazyLoad(){
-    const imgs = document.querySelectorAll("img.lazy");
-
-    const obs = new IntersectionObserver(entries=>{
-        entries.forEach(e=>{
-            if(e.isIntersecting){
-                let img = e.target;
-                img.src = img.dataset.src;
-                obs.unobserve(img);
+        img.parentElement.onclick=(e)=>{
+            if(e.target===img){
+                img.parentElement.classList.toggle("show-info");
             }
-        });
+        };
     });
 
-    imgs.forEach(i=>obs.observe(i));
+    page++;
+    loading=false;
 }
 
-const observer = new IntersectionObserver(entries=>{
-    if(entries[0].isIntersecting){
-        load();
-    }
-});
-
-observer.observe(document.getElementById("loadMore"));
+function doSearch(){
+    keyword=document.getElementById("search").value;
+    page=0;
+    document.getElementById("grid").innerHTML="";
+    load();
+}
 
 load();
 
 </script>
+
 </body>
 </html>
 """
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    return HTMLResponse(content=HTML)
+def index():
+    return HTML
